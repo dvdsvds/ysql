@@ -1,4 +1,0 @@
-/home/yeon/project/ysql/build/CMakeFiles/ysql.dir
-/home/yeon/project/ysql/build/CMakeFiles/test_pager.dir
-/home/yeon/project/ysql/build/CMakeFiles/edit_cache.dir
-/home/yeon/project/ysql/build/CMakeFiles/rebuild_cache.dir
