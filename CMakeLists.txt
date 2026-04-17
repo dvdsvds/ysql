@@ -10,6 +10,7 @@ add_library(ysql
     src/page.cpp
     src/pager.cpp
     src/btree.cpp
+    src/buffer_pool.cpp
 )
 target_include_directories(ysql PUBLIC .)
 
