@@ -34,4 +34,6 @@ namespace ysql {
         uint32_t key;
         uint32_t child_page_id;
     };
+
+    constexpr uint16_t MAX_INTERNAL_CELLS = (PAGE_SIZE - sizeof(InternalHeader)) / sizeof(InternalCell);
 }

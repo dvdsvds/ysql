@@ -355,10 +355,45 @@ void test11() {
     cout << "TEST PASS" << endl;
 }
 
-int main() {
-    void(*functions[])() = {test1, test2, test3, test4, test5, test6, test7, test8, test9, test10, test11};
+void test12() {
+    std::remove("test.db");
+    Pager pager;
+    pager.open("test.db");
+    BufferPool bp(&pager, 1000);
+    uint32_t page_id = pager.allocate();
+    uint8_t buf[PAGE_SIZE] = {};
+    PageHeader* header = reinterpret_cast<PageHeader*>(buf);
+    header->page_type = PAGE_TYPE::LEAF;
+    header->cell_count = 0;
+    header->free_space_offset = PAGE_HEADER_SIZE;
+    pager.write(page_id, buf);
 
-    for(int i = 0; i < 11; i++) {
+    BTree bt(&bp, &pager, page_id);
+    const uint32_t N = 150000;
+
+    for (uint32_t i = 0; i < N; i++) {
+        bt.insert({i, i * 100});
+        if (i % 10000 == 0) {
+            cout << "inserted: " << i << endl;
+        }
+    }
+
+    for (uint32_t i = 0; i < N; i++) {
+        auto r = bt.search(i);
+        if (!r.has_value() || r.value() != i * 100) {
+            cout << "FAIL: key " << i << endl;
+            return;
+        }
+        if (i % 10000 == 0) {
+            cout << "searched: " << i << endl;
+        }
+    }
+    cout << "TEST PASS" << endl;
+}
+int main() {
+    void(*functions[])() = {test1, test2, test3, test4, test5, test6, test7, test8, test9, test10, test11, test12};
+
+    for(int i = 0; i < 12; i++) {
         cout << "======TEST" << i + 1 << "======" << endl;
         functions[i]();
     }

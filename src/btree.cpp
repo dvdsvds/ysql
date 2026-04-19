@@ -1,5 +1,6 @@
 #include "btree.h"
 #include "src/page.h"
+#include <cstdio>
 #include <cstring>
 #include <optional>
 
@@ -8,7 +9,7 @@ using namespace ysql;
 uint32_t BTree::find_leaf(uint32_t key, std::vector<PathEntry>& path) {
     path.clear();
 
-    uint32_t current= root_page_id;
+    uint32_t current = root_page_id;
     while(true) {
         uint8_t* buf = buffer_pool->get_page(current);
         PageHeader* header = reinterpret_cast<PageHeader*>(buf);
@@ -73,17 +74,23 @@ void BTree::insert(const Cell& cell) {
     buffer_pool->make_dirty(leaf_id);
 }
 
-void BTree::insert_into_parent(uint32_t parent_id, uint32_t child_index, uint32_t split_key, uint32_t new_page_id) {
+void BTree::insert_into_parent(uint32_t parent_id, uint32_t child_index, uint32_t split_key, uint32_t new_page_id, const std::vector<PathEntry>& path) {
     uint8_t* buf = buffer_pool->get_page(parent_id);
     InternalHeader* iheader = reinterpret_cast<InternalHeader*>(buf);
+    fprintf(stderr, "[insert_into_parent] parent=%u, cell_count(before)=%u, child_index=%u,  path.size()=%zu\n", parent_id, iheader->base.cell_count, child_index, path.size());
     InternalCell* icells = reinterpret_cast<InternalCell*>(buf + sizeof(InternalHeader));
 
     memmove(&icells[child_index + 1], &icells[child_index], (iheader->base.cell_count - child_index) * sizeof(InternalCell));
     icells[child_index].key = split_key;
     icells[child_index].child_page_id = new_page_id;
-
     iheader->base.cell_count += 1;
     buffer_pool->make_dirty(parent_id);
+
+    if(iheader->base.cell_count == MAX_INTERNAL_CELLS) {
+        std::vector<PathEntry> parent_path = path;
+        if(!parent_path.empty()) parent_path.pop_back();
+        split_internal(parent_id, parent_path);
+    }
 }
 
 std::optional<uint32_t> BTree::search(const uint32_t& key) {
@@ -140,7 +147,49 @@ void BTree::split(uint32_t page_id, const std::vector<PathEntry>& path) {
         root_page_id = internal_id;
     } else {
         const PathEntry& parent = path.back();
-        insert_into_parent(parent.page_id, parent.child_index, split_key, new_page_id);
+        insert_into_parent(parent.page_id, parent.child_index, split_key, new_page_id, path);
+    }
+}
+
+void BTree::split_internal(uint32_t page_id, const std::vector<PathEntry>& path) {
+    uint8_t* ibuf = buffer_pool->get_page(page_id);
+
+    InternalHeader* iheader = reinterpret_cast<InternalHeader*>(ibuf);
+    InternalCell* icells = reinterpret_cast<InternalCell*>(ibuf + sizeof(InternalHeader));
+    uint16_t mid = iheader->base.cell_count / 2;
+    uint32_t split_key = icells[mid].key;
+
+    uint32_t new_page_id = pager->allocate();
+    buffer_pool->make_dirty(new_page_id);
+    uint8_t* inbuf = buffer_pool->get_page(new_page_id);
+    InternalHeader* inheader = reinterpret_cast<InternalHeader*>(inbuf);
+    inheader->base.page_type = PAGE_TYPE::INTERNAL;
+    inheader->left_child = icells[mid].child_page_id;
+
+    InternalCell* incells = reinterpret_cast<InternalCell*>(inbuf + sizeof(InternalHeader));
+    std::memcpy(incells, &icells[mid + 1], sizeof(InternalCell) * (iheader->base.cell_count - mid - 1));
+    inheader->base.cell_count = iheader->base.cell_count - mid - 1;
+    iheader->base.cell_count = mid;
+    buffer_pool->make_dirty(page_id);
+
+    fprintf(stderr, "[split_internal] page=%u, path.size()=%zu\n", page_id, path.size());
+
+    if(path.empty()) {
+        uint32_t internal_id = pager->allocate();
+        uint8_t* ibuf2 = buffer_pool->get_page(internal_id);
+        InternalHeader* iheader2 = reinterpret_cast<InternalHeader*>(ibuf2);
+        iheader2->base.page_type = PAGE_TYPE::INTERNAL;
+        iheader2->base.cell_count = 1;
+        iheader2->left_child = page_id;
+
+        InternalCell* icells2 = reinterpret_cast<InternalCell*>(ibuf2 + sizeof(InternalHeader));
+        icells2[0].key = split_key;
+        icells2[0].child_page_id = new_page_id;
+
+        buffer_pool->make_dirty(internal_id);
+        root_page_id = internal_id;
+    } else {
+        insert_into_parent(path.back().page_id, path.back().child_index, split_key, new_page_id, path);
     }
 }
 
