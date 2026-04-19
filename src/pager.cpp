@@ -1,4 +1,5 @@
 #include "pager.h"
+#include "page.h"
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>

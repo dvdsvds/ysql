@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <string>
-#include "page.h"
 namespace ysql {
     struct FileHeader {
         uint32_t magic_num = 0x5953514C;

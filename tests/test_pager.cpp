@@ -359,7 +359,7 @@ void test12() {
     std::remove("test.db");
     Pager pager;
     pager.open("test.db");
-    BufferPool bp(&pager, 1000);
+    BufferPool bp(&pager, 100);
     uint32_t page_id = pager.allocate();
     uint8_t buf[PAGE_SIZE] = {};
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);

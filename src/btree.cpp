@@ -14,6 +14,7 @@ uint32_t BTree::find_leaf(uint32_t key, std::vector<PathEntry>& path) {
         uint8_t* buf = buffer_pool->get_page(current);
         PageHeader* header = reinterpret_cast<PageHeader*>(buf);
         if(header->page_type == PAGE_TYPE::LEAF) {
+            buffer_pool->unpin_page(current);
             return current;
         }
         InternalHeader* iheader = reinterpret_cast<InternalHeader*>(buf);
@@ -35,6 +36,7 @@ uint32_t BTree::find_leaf(uint32_t key, std::vector<PathEntry>& path) {
         }
 
         path.push_back({current, child_index});
+        buffer_pool->unpin_page(current);
         current = next_page;
     }
 }
@@ -50,6 +52,7 @@ void BTree::insert(const Cell& cell) {
     uint8_t* buf = buffer_pool->get_page(leaf_id);
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     if(header->cell_count == MAX_CELLS) {
+        buffer_pool->unpin_page(leaf_id);
         split(leaf_id, path);
         leaf_id = find_leaf(cell.key, path);
         buf = buffer_pool->get_page(leaf_id);
@@ -72,12 +75,12 @@ void BTree::insert(const Cell& cell) {
     }
     header->cell_count++;
     buffer_pool->make_dirty(leaf_id);
+    buffer_pool->unpin_page(leaf_id);
 }
 
 void BTree::insert_into_parent(uint32_t parent_id, uint32_t child_index, uint32_t split_key, uint32_t new_page_id, const std::vector<PathEntry>& path) {
     uint8_t* buf = buffer_pool->get_page(parent_id);
     InternalHeader* iheader = reinterpret_cast<InternalHeader*>(buf);
-    fprintf(stderr, "[insert_into_parent] parent=%u, cell_count(before)=%u, child_index=%u,  path.size()=%zu\n", parent_id, iheader->base.cell_count, child_index, path.size());
     InternalCell* icells = reinterpret_cast<InternalCell*>(buf + sizeof(InternalHeader));
 
     memmove(&icells[child_index + 1], &icells[child_index], (iheader->base.cell_count - child_index) * sizeof(InternalCell));
@@ -86,7 +89,10 @@ void BTree::insert_into_parent(uint32_t parent_id, uint32_t child_index, uint32_
     iheader->base.cell_count += 1;
     buffer_pool->make_dirty(parent_id);
 
-    if(iheader->base.cell_count == MAX_INTERNAL_CELLS) {
+    bool need_split = (iheader->base.cell_count >= MAX_INTERNAL_CELLS);
+    buffer_pool->unpin_page(parent_id);
+
+    if(need_split) {
         std::vector<PathEntry> parent_path = path;
         if(!parent_path.empty()) parent_path.pop_back();
         split_internal(parent_id, parent_path);
@@ -99,15 +105,20 @@ std::optional<uint32_t> BTree::search(const uint32_t& key) {
 
     Cell* cells = reinterpret_cast<Cell*>(buf + PAGE_HEADER_SIZE);
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
+
+    std::optional<uint32_t> result = std::nullopt;
     for(size_t i = 0; i < header->cell_count; i++) {
         if(cells[i].key == key) {
-            return cells[i].value;
+            result = cells[i].value;
+            break; 
         }
         if(cells[i].key > key) {
-            return std::nullopt;
+            break;
         } 
     }
-    return std::nullopt;
+
+    buffer_pool->unpin_page(leaf_id);
+    return result;
 }
 
 void BTree::split(uint32_t page_id, const std::vector<PathEntry>& path) {
@@ -119,17 +130,18 @@ void BTree::split(uint32_t page_id, const std::vector<PathEntry>& path) {
     uint32_t split_key = cell[mid].key;
 
     uint32_t new_page_id = pager->allocate();
-    buffer_pool->make_dirty(new_page_id);
     uint8_t* nbuf = buffer_pool->get_page(new_page_id);
     PageHeader* nheader = reinterpret_cast<PageHeader*>(nbuf);
     nheader->page_type = PAGE_TYPE::LEAF;
     nheader->cell_count = header->cell_count - mid;
     Cell* ncell = reinterpret_cast<Cell*>(nbuf + PAGE_HEADER_SIZE);
-
     std::memcpy(ncell, cell + mid, sizeof(Cell) * (header->cell_count - mid));
-
     header->cell_count = mid;
+    buffer_pool->make_dirty(new_page_id);
     buffer_pool->make_dirty(page_id);
+
+    buffer_pool->unpin_page(new_page_id);
+    buffer_pool->unpin_page(page_id);
 
     if(path.empty()) {
         uint32_t internal_id = pager->allocate();
@@ -145,6 +157,7 @@ void BTree::split(uint32_t page_id, const std::vector<PathEntry>& path) {
 
         buffer_pool->make_dirty(internal_id);
         root_page_id = internal_id;
+        buffer_pool->unpin_page(internal_id);
     } else {
         const PathEntry& parent = path.back();
         insert_into_parent(parent.page_id, parent.child_index, split_key, new_page_id, path);
@@ -160,7 +173,6 @@ void BTree::split_internal(uint32_t page_id, const std::vector<PathEntry>& path)
     uint32_t split_key = icells[mid].key;
 
     uint32_t new_page_id = pager->allocate();
-    buffer_pool->make_dirty(new_page_id);
     uint8_t* inbuf = buffer_pool->get_page(new_page_id);
     InternalHeader* inheader = reinterpret_cast<InternalHeader*>(inbuf);
     inheader->base.page_type = PAGE_TYPE::INTERNAL;
@@ -170,9 +182,12 @@ void BTree::split_internal(uint32_t page_id, const std::vector<PathEntry>& path)
     std::memcpy(incells, &icells[mid + 1], sizeof(InternalCell) * (iheader->base.cell_count - mid - 1));
     inheader->base.cell_count = iheader->base.cell_count - mid - 1;
     iheader->base.cell_count = mid;
+
+    buffer_pool->make_dirty(new_page_id);
     buffer_pool->make_dirty(page_id);
 
-    fprintf(stderr, "[split_internal] page=%u, path.size()=%zu\n", page_id, path.size());
+    buffer_pool->unpin_page(new_page_id);
+    buffer_pool->unpin_page(page_id);
 
     if(path.empty()) {
         uint32_t internal_id = pager->allocate();
@@ -188,6 +203,7 @@ void BTree::split_internal(uint32_t page_id, const std::vector<PathEntry>& path)
 
         buffer_pool->make_dirty(internal_id);
         root_page_id = internal_id;
+        buffer_pool->unpin_page(internal_id);
     } else {
         insert_into_parent(path.back().page_id, path.back().child_index, split_key, new_page_id, path);
     }
@@ -199,6 +215,7 @@ void BTree::remove(const uint32_t& key) {
 
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     Cell* cells = reinterpret_cast<Cell*>(buf + PAGE_HEADER_SIZE);
+
     for(size_t i = 0; i < header->cell_count; i++) {
         if(cells[i].key == key) {
             for(size_t j = i; j < header->cell_count - 1; j++) {
@@ -206,7 +223,8 @@ void BTree::remove(const uint32_t& key) {
             }
             header->cell_count--;
             buffer_pool->make_dirty(leaf_id);
-            return;
+            break;
         }
     }
+    buffer_pool->unpin_page(leaf_id);
 }
