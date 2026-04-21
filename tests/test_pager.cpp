@@ -70,7 +70,7 @@ void test4() {
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     header->page_type = PAGE_TYPE::LEAF;
     header->cell_count = 0;
-    header->free_space_offset = PAGE_HEADER_SIZE;
+    header->free_space_offset = sizeof(LeafHeader);
     pager.write(page_id, buf);
 
 
@@ -96,7 +96,7 @@ void test4() {
     }
 
     pager.read(page_id, buf);
-    Cell* cells = reinterpret_cast<Cell*>(buf + PAGE_HEADER_SIZE);
+    LeafCell* cells = reinterpret_cast<LeafCell*>(buf + sizeof(LeafHeader));
 
     for(size_t i = 0; i < header->cell_count; i++) {
         cout << "key:" << cells[i].key << "| value: " << cells[i].value << endl;
@@ -113,18 +113,18 @@ void test5() {
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     header->page_type = PAGE_TYPE::LEAF;
     header->cell_count = 0;
-    header->free_space_offset = PAGE_HEADER_SIZE;
+    header->free_space_offset = sizeof(LeafHeader);
     pager.write(page_id, buf);
 
     BTree bt(&bp, &pager, page_id);
-    for(uint32_t i = 0; i < MAX_CELLS + 10; i++) {
+    for(uint32_t i = 0; i < MAX_LEAF_CELLS + 10; i++) {
         bt.insert({i, i * 100});
         if(i % 100 == 0) {
             cout << "inserted: " << i << endl;
         }
     }
 
-    for(uint32_t i = 0; i < MAX_CELLS + 10; i++) {
+    for(uint32_t i = 0; i < MAX_LEAF_CELLS + 10; i++) {
         auto r = bt.search(i);
         if(!r.has_value() || r.value() != i * 100) {
             cout << "FAIL: key " << i << endl;
@@ -146,7 +146,7 @@ void test6() {
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     header->page_type = PAGE_TYPE::LEAF;
     header->cell_count = 0;
-    header->free_space_offset = PAGE_HEADER_SIZE;
+    header->free_space_offset = sizeof(LeafHeader);
     pager.write(page_id, buf);
 
     BTree bt(&bp, &pager, page_id);
@@ -188,7 +188,7 @@ void test7() {
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     header->page_type = PAGE_TYPE::LEAF;
     header->cell_count = 0;
-    header->free_space_offset = PAGE_HEADER_SIZE;
+    header->free_space_offset = sizeof(LeafHeader);
     pager.write(page_id, buf);
 
     BTree bt(&bp, &pager, page_id);
@@ -218,7 +218,7 @@ void test8() {
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     header->page_type = PAGE_TYPE::LEAF;
     header->cell_count = 0;
-    header->free_space_offset = PAGE_HEADER_SIZE;
+    header->free_space_offset = sizeof(LeafHeader);
     pager.write(page_id, buf);
 
     BTree bt(&bp, &pager, page_id);
@@ -249,11 +249,11 @@ void test9() {
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     header->page_type = PAGE_TYPE::LEAF;
     header->cell_count = 0;
-    header->free_space_offset = PAGE_HEADER_SIZE;
+    header->free_space_offset = sizeof(LeafHeader);
     pager.write(page_id, buf);
 
     BTree bt(&bp, &pager, page_id);
-    for(uint32_t i = 0; i < MAX_CELLS + 10; i++) {
+    for(uint32_t i = 0; i < MAX_LEAF_CELLS + 10; i++) {
         bt.insert({i, i * 100});
     }
 
@@ -266,9 +266,9 @@ void test9() {
     cout << endl;
 
     std::vector<PathEntry> path2;
-    uint32_t leaf2 = bt.find_leaf(MAX_CELLS  +5, path2);
+    uint32_t leaf2 = bt.find_leaf(MAX_LEAF_CELLS  +5, path2);
 
-    cout << "key=" << (MAX_CELLS + 5) << ": leaf=" << leaf2 << ", path.size()=" << path2.size();
+    cout << "key=" << (MAX_LEAF_CELLS + 5) << ": leaf=" << leaf2 << ", path.size()=" << path2.size();
     if(path2.size() == 1) {
         cout <<", child_index=" << path2[0].child_index;
     }
@@ -291,17 +291,17 @@ void test10() {
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     header->page_type = PAGE_TYPE::LEAF;
     header->cell_count = 0;
-    header->free_space_offset = PAGE_HEADER_SIZE;
+    header->free_space_offset = sizeof(LeafHeader);
     pager.write(page_id, buf);
 
     BTree bt(&bp, &pager, page_id);
-    for (uint32_t i = 0; i < MAX_CELLS + 10; i++) {
+    for (uint32_t i = 0; i < MAX_LEAF_CELLS + 10; i++) {
         bt.insert({i, i * 100});
     }
 
     // 여러 key로 find_leaf 호출해서 전부 리프인지 확인
     bool all_pass = true;
-    uint32_t keys[] = {0, 100, 500, MAX_CELLS - 1, MAX_CELLS + 5};
+    uint32_t keys[] = {0, 100, 500, MAX_LEAF_CELLS - 1, MAX_LEAF_CELLS + 5};
     for (uint32_t k : keys) {
         std::vector<PathEntry> path;
         uint32_t leaf = bt.find_leaf(k, path);
@@ -331,18 +331,18 @@ void test11() {
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     header->page_type = PAGE_TYPE::LEAF;
     header->cell_count = 0;
-    header->free_space_offset = PAGE_HEADER_SIZE;
+    header->free_space_offset = sizeof(LeafHeader);
     pager.write(page_id, buf);
 
     BTree bt(&bp, &pager, page_id);
-    for (uint32_t i = 0; i < MAX_CELLS * 2; i++) {
+    for (uint32_t i = 0; i < MAX_LEAF_CELLS * 2; i++) {
         bt.insert({i, i * 100});
         if (i % 100 == 0) {
             cout << "inserted: " << i << endl;
         }
     }
 
-    for (uint32_t i = 0; i < MAX_CELLS * 2; i++) {
+    for (uint32_t i = 0; i < MAX_LEAF_CELLS * 2; i++) {
         auto r = bt.search(i);
         if (!r.has_value() || r.value() != i * 100) {
             cout << "FAIL: key " << i << endl;
@@ -365,7 +365,7 @@ void test12() {
     PageHeader* header = reinterpret_cast<PageHeader*>(buf);
     header->page_type = PAGE_TYPE::LEAF;
     header->cell_count = 0;
-    header->free_space_offset = PAGE_HEADER_SIZE;
+    header->free_space_offset = sizeof(LeafHeader);
     pager.write(page_id, buf);
 
     BTree bt(&bp, &pager, page_id);

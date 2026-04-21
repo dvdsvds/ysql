@@ -1,6 +1,7 @@
 #include "btree.h"
 #include "src/page.h"
 #include <cstdio>
+#include <iostream>
 #include <cstring>
 #include <optional>
 
@@ -10,7 +11,9 @@ uint32_t BTree::find_leaf(uint32_t key, std::vector<PathEntry>& path) {
     path.clear();
 
     uint32_t current = root_page_id;
+    int depth = 0;
     while(true) {
+        depth++;
         uint8_t* buf = buffer_pool->get_page(current);
         PageHeader* header = reinterpret_cast<PageHeader*>(buf);
         if(header->page_type == PAGE_TYPE::LEAF) {
@@ -30,7 +33,7 @@ uint32_t BTree::find_leaf(uint32_t key, std::vector<PathEntry>& path) {
          
         uint32_t next_page;
         if(child_index == 0) {
-            next_page = iheader->left_child;
+            next_page = iheader->left_child_id;
         } else {
             next_page = icells[child_index - 1].child_page_id;
         }
@@ -39,6 +42,7 @@ uint32_t BTree::find_leaf(uint32_t key, std::vector<PathEntry>& path) {
         buffer_pool->unpin_page(current);
         current = next_page;
     }
+    std::cerr << "find_leaf depth=" << depth << std::endl;
 }
 
 uint32_t BTree::find_leaf(uint32_t key) {
@@ -46,23 +50,23 @@ uint32_t BTree::find_leaf(uint32_t key) {
     return find_leaf(key, dummy);
 }
 
-void BTree::insert(const Cell& cell) {
+void BTree::insert(const LeafCell& cell) {
     std::vector<PathEntry> path;
     uint32_t leaf_id = find_leaf(cell.key, path);
     uint8_t* buf = buffer_pool->get_page(leaf_id);
-    PageHeader* header = reinterpret_cast<PageHeader*>(buf);
-    if(header->cell_count == MAX_CELLS) {
+    LeafHeader* header = reinterpret_cast<LeafHeader*>(buf);
+    if(header->base.cell_count == MAX_LEAF_CELLS) {
         buffer_pool->unpin_page(leaf_id);
         split(leaf_id, path);
         leaf_id = find_leaf(cell.key, path);
         buf = buffer_pool->get_page(leaf_id);
-        header = reinterpret_cast<PageHeader*>(buf);
+        header = reinterpret_cast<LeafHeader*>(buf);
     }
 
-    Cell* cells = reinterpret_cast<Cell*>(buf + PAGE_HEADER_SIZE);
+    LeafCell* cells = reinterpret_cast<LeafCell*>(buf + sizeof(LeafHeader));
     
     size_t i;
-    for(i = header->cell_count; i > 0; i--) {
+    for(i = header->base.cell_count; i > 0; i--) {
         if(cells[i - 1].key > cell.key) {
             cells[i] = cells[i - 1];
         } else {
@@ -73,7 +77,7 @@ void BTree::insert(const Cell& cell) {
     if(i == 0) {
         cells[0] = cell;
     }
-    header->cell_count++;
+    header->base.cell_count++;
     buffer_pool->make_dirty(leaf_id);
     buffer_pool->unpin_page(leaf_id);
 }
@@ -103,11 +107,11 @@ std::optional<uint32_t> BTree::search(const uint32_t& key) {
     uint32_t leaf_id = find_leaf(key);
     uint8_t* buf = buffer_pool->get_page(leaf_id);
 
-    Cell* cells = reinterpret_cast<Cell*>(buf + PAGE_HEADER_SIZE);
-    PageHeader* header = reinterpret_cast<PageHeader*>(buf);
+    LeafCell* cells = reinterpret_cast<LeafCell*>(buf + sizeof(LeafHeader));
+    LeafHeader* header = reinterpret_cast<LeafHeader*>(buf);
 
     std::optional<uint32_t> result = std::nullopt;
-    for(size_t i = 0; i < header->cell_count; i++) {
+    for(size_t i = 0; i < header->base.cell_count; i++) {
         if(cells[i].key == key) {
             result = cells[i].value;
             break; 
@@ -124,19 +128,21 @@ std::optional<uint32_t> BTree::search(const uint32_t& key) {
 void BTree::split(uint32_t page_id, const std::vector<PathEntry>& path) {
     uint8_t* buf = buffer_pool->get_page(page_id);
     
-    PageHeader* header = reinterpret_cast<PageHeader*>(buf);
-    Cell* cell = reinterpret_cast<Cell*>(buf + PAGE_HEADER_SIZE);
-    uint16_t mid = header->cell_count / 2;
+    LeafHeader* header = reinterpret_cast<LeafHeader*>(buf);
+    LeafCell* cell = reinterpret_cast<LeafCell*>(buf + sizeof(LeafHeader));
+    uint16_t mid = header->base.cell_count / 2;
     uint32_t split_key = cell[mid].key;
 
     uint32_t new_page_id = pager->allocate();
     uint8_t* nbuf = buffer_pool->get_page(new_page_id);
-    PageHeader* nheader = reinterpret_cast<PageHeader*>(nbuf);
-    nheader->page_type = PAGE_TYPE::LEAF;
-    nheader->cell_count = header->cell_count - mid;
-    Cell* ncell = reinterpret_cast<Cell*>(nbuf + PAGE_HEADER_SIZE);
-    std::memcpy(ncell, cell + mid, sizeof(Cell) * (header->cell_count - mid));
-    header->cell_count = mid;
+    LeafHeader* nheader = reinterpret_cast<LeafHeader*>(nbuf);
+    nheader->base.page_type = PAGE_TYPE::LEAF;
+    nheader->base.cell_count = header->base.cell_count - mid;
+    nheader->next_leaf = header->next_leaf;
+    header->next_leaf = new_page_id;
+    LeafCell* ncell = reinterpret_cast<LeafCell*>(nbuf + sizeof(LeafHeader));
+    std::memcpy(ncell, cell + mid, sizeof(LeafCell) * (header->base.cell_count - mid));
+    header->base.cell_count = mid;
     buffer_pool->make_dirty(new_page_id);
     buffer_pool->make_dirty(page_id);
 
@@ -149,7 +155,7 @@ void BTree::split(uint32_t page_id, const std::vector<PathEntry>& path) {
         InternalHeader* iheader = reinterpret_cast<InternalHeader*>(ibuf);
         iheader->base.page_type = PAGE_TYPE::INTERNAL;
         iheader->base.cell_count = 1;
-        iheader->left_child = page_id;
+        iheader->left_child_id = page_id;
 
         InternalCell* icells = reinterpret_cast<InternalCell*>(ibuf + sizeof(InternalHeader));
         icells[0].key = split_key;
@@ -176,7 +182,7 @@ void BTree::split_internal(uint32_t page_id, const std::vector<PathEntry>& path)
     uint8_t* inbuf = buffer_pool->get_page(new_page_id);
     InternalHeader* inheader = reinterpret_cast<InternalHeader*>(inbuf);
     inheader->base.page_type = PAGE_TYPE::INTERNAL;
-    inheader->left_child = icells[mid].child_page_id;
+    inheader->left_child_id = icells[mid].child_page_id;
 
     InternalCell* incells = reinterpret_cast<InternalCell*>(inbuf + sizeof(InternalHeader));
     std::memcpy(incells, &icells[mid + 1], sizeof(InternalCell) * (iheader->base.cell_count - mid - 1));
@@ -195,7 +201,7 @@ void BTree::split_internal(uint32_t page_id, const std::vector<PathEntry>& path)
         InternalHeader* iheader2 = reinterpret_cast<InternalHeader*>(ibuf2);
         iheader2->base.page_type = PAGE_TYPE::INTERNAL;
         iheader2->base.cell_count = 1;
-        iheader2->left_child = page_id;
+        iheader2->left_child_id = page_id;
 
         InternalCell* icells2 = reinterpret_cast<InternalCell*>(ibuf2 + sizeof(InternalHeader));
         icells2[0].key = split_key;
@@ -213,15 +219,15 @@ void BTree::remove(const uint32_t& key) {
     uint32_t leaf_id = find_leaf(key);
     uint8_t* buf = buffer_pool->get_page(leaf_id);
 
-    PageHeader* header = reinterpret_cast<PageHeader*>(buf);
-    Cell* cells = reinterpret_cast<Cell*>(buf + PAGE_HEADER_SIZE);
+    LeafHeader* header = reinterpret_cast<LeafHeader*>(buf);
+    LeafCell* cells = reinterpret_cast<LeafCell*>(buf + sizeof(LeafHeader));
 
-    for(size_t i = 0; i < header->cell_count; i++) {
+    for(size_t i = 0; i < header->base.cell_count; i++) {
         if(cells[i].key == key) {
-            for(size_t j = i; j < header->cell_count - 1; j++) {
+            for(size_t j = i; j < header->base.cell_count - 1; j++) {
                 cells[j] = cells[j + 1];
             }
-            header->cell_count--;
+            header->base.cell_count--;
             buffer_pool->make_dirty(leaf_id);
             break;
         }

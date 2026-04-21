@@ -3,7 +3,6 @@
 #include <cstdint>
 namespace ysql {
     constexpr uint32_t PAGE_SIZE = 4 * 1024;
-    constexpr uint16_t PAGE_HEADER_SIZE = 6;
 
     enum class PAGE_TYPE : uint8_t {
         FILE_HEADER = 0,
@@ -18,16 +17,9 @@ namespace ysql {
         uint16_t free_space_offset;
     };
 
-    struct Cell {
-        uint32_t key;
-        uint32_t value;
-    };
-
-    constexpr uint16_t MAX_CELLS = (PAGE_SIZE - PAGE_HEADER_SIZE) / sizeof(Cell);
-
     struct InternalHeader {
         PageHeader base;
-        uint32_t left_child;
+        uint32_t left_child_id;
     };
 
     struct InternalCell {
@@ -35,5 +27,16 @@ namespace ysql {
         uint32_t child_page_id;
     };
 
+    struct LeafHeader {
+        PageHeader base;
+        uint32_t next_leaf;
+    };
+
+    struct LeafCell {
+        uint32_t key;
+        uint32_t value;
+    };
+
+    constexpr uint16_t MAX_LEAF_CELLS = (PAGE_SIZE - sizeof(LeafHeader)) / sizeof(LeafCell);
     constexpr uint16_t MAX_INTERNAL_CELLS = (PAGE_SIZE - sizeof(InternalHeader)) / sizeof(InternalCell);
 }

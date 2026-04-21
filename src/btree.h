@@ -18,7 +18,7 @@ namespace ysql {
             uint32_t root_page_id;
         public:
             BTree(BufferPool* buffer_pool, Pager* pager, uint32_t root_page_id) : buffer_pool(buffer_pool), pager(pager), root_page_id(root_page_id) {}
-            void insert(const Cell& cell);
+            void insert(const LeafCell& cell);
             std::optional<uint32_t> search(const uint32_t& key);
             void split(uint32_t page_id, const std::vector<PathEntry>& path);
             void split_internal(uint32_t page_id, const std::vector<PathEntry>& path);
